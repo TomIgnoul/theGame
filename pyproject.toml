@@ -1,0 +1,25 @@
+[project]
+name = "thegame"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Tom Ignoul",email = "tom.ignoul@student.ehb.be"}
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "certifi (==2025.10.5)",
+    "charset-normalizer (==3.4.4)",
+    "idna (==3.11)",
+    "psycopg (==3.2.11)",
+    "psycopg-binary (==3.2.11)",
+    "python-dotenv (==1.1.1)",
+    "requests (==2.32.5)",
+    "typing-extensions (==4.15.0)",
+    "urllib3 (==2.5.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
