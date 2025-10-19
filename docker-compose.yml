@@ -1,0 +1,20 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: thegame-db
+    network_mode: "host"
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: W@cthw00rd
+      POSTGRES_DB: thegame
+    ports:
+      - "5432:5432"
+    volumes:
+      - thegame_data:/var/lib/postgresql/data
+    restart: always
+
+volumes:
+  thegame_data:
+
