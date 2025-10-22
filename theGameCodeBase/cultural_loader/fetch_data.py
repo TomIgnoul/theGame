@@ -6,6 +6,7 @@ from transform import transform_record
 BASE_URL = "https://opendata.brussels.be"
 DATASET = "bruxelles_lieux_culturels"
 ENDPOINT = f"/api/explore/v2.1/catalog/datasets/{DATASET}/records"  
+ENDPOINT2 = F"/api/explore/v2.1/catalog/datasets/bruxelles_lieux_culturels/records?limit=20"
 URL = BASE_URL + ENDPOINT
 DB_CONNINFO = "dbname=thegame user=admin password=W@cthw00rd host=localhost port=5432"
 

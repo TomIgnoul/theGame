@@ -1,8 +1,0 @@
-FROM postgres:15
-
-ENV POSTGRES_USER=postgres
-ENV POSTGRES_PASSWORD=W@cthw00rd
-ENV POSTGRES_DB=thegame
-
-EXPOSE 5432
-
