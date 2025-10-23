@@ -3,12 +3,10 @@ import psycopg
 from paginate import page_through
 from requests.exceptions import HTTPError, RequestException
 from transform import transform_record
-BASE_URL = "https://opendata.brussels.be"
-DATASET = "bruxelles_lieux_culturels"
-ENDPOINT = f"/api/explore/v2.1/catalog/datasets/{DATASET}/records"  
-ENDPOINT2 = F"/api/explore/v2.1/catalog/datasets/bruxelles_lieux_culturels/records?limit=20"
-URL = BASE_URL + ENDPOINT
+from api_list import BASE_URL, DATASETS  
+
 DB_CONNINFO = "dbname=thegame user=admin password=W@cthw00rd host=localhost port=5432"
+
 
 def insert_cultural_site(clean):
     """Insert one cleaned record into PostgreSQL using psycopg3."""
@@ -24,10 +22,10 @@ def insert_cultural_site(clean):
                             %(google_street_view_url)s, %(longitude)s, %(latitude)s)
                 """, clean)
                 conn.commit()
-        print("Inserted:", clean["description_nl"] or clean["description_fr"])
+        print("Inserted:", clean.get("description_nl") or clean.get("description_fr"))
     except Exception as e:
         print("Insert failed:", e)
-    
+
 
 def fetch(url, params=None):
     try:
@@ -42,54 +40,34 @@ def fetch(url, params=None):
         print(f"[JSON parse error] {url}: {json_err}")
     return None
 
-def fetch_page(limit: int, offset: int) -> list[dict]:
-    data = fetch(URL, params={"limit": limit, "offset": offset})
+
+def fetch_page(dataset: str, limit: int, offset: int) -> list[dict]:
+    """Fetch a single page for a given dataset."""
+    url = f"{BASE_URL}/api/explore/v2.1/catalog/datasets/{dataset}/records"
+    data = fetch(url, params={"limit": limit, "offset": offset})
     if data is None:
         return []
-    return data.get("results",[])
-
-payload = fetch(URL, params={"limit": 20})
-if payload is None:
-    print("Fetch failed — retry")
-else:
-    results = payload.get("results", [])
-    print("Fetch succeeded.")
-    print(f"Fetched {len(results)} records")
-
-i=0
-for i in (0,2,4):
-    print("offset =", i) 
-    payload = fetch(URL, params={"limit":2, "offset": i})
-    if payload is None:
-        print(" fetch failed - skipping")
-        continue
-
-    results = payload.get("results", [])
-    if not results:
-        print(" empty page")
-        continue
-
-    rec = results [0]
-    clean = transform_record(rec)
-    insert_cultural_site(clean)
-    if i == 0:
-        print(" rec keys:", list(rec.keys()))
-        print(" rec sample:", rec)
-    rid = rec.get("id", "no-id")
-    fields = rec.get("fields", rec)
-    title = fields.get("beschrijving") or fields.get("description") or "(no title)"
-
-    print(f" id={rid} title={title}")
+    return data.get("results", [])
 
 
 if __name__ == "__main__":
-    seen = 0
-    for page in page_through(fetch_page, per_page=2, max_pages=3):
-        titles = [
-            (rec.get("beschrijving") or rec.get("description") or "(no title)")
-            for rec in page
-        ]
-        print(f"page size={len(page)} titles={titles}")
-        seen += len(page)
-    print("total seen:", seen)
+    for name, dataset in DATASETS.items():
+        print(f"\n=== Fetching dataset: {name} ===")
+        url = f"{BASE_URL}/api/explore/v2.1/catalog/datasets/{dataset}/records"
+        payload = fetch(url, params={"limit": 5})
+        if payload is None:
+            print(f"Fetch failed for {name}")
+            continue
+
+        results = payload.get("results", [])
+        print(f" Fetched {len(results)} records for {name}")
+
+        # process first few results
+        for rec in results[:3]:
+            clean = transform_record(rec)
+            insert_cultural_site(clean)
+            rid = rec.get("id", "no-id")
+            fields = rec.get("fields", rec)
+            title = fields.get("beschrijving") or fields.get("description") or "(no title)"
+            print(f"   → id={rid} title={title}")
 
