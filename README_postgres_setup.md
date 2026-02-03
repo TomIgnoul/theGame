@@ -6,7 +6,7 @@ Project Path
 Step 1 — Create the Docker Compose Setup
 ----------------------------------------
 In your project root:
-    cd /home/tom/Dev/theGame
+    cd /home/user/Dev/theGame
     nano docker-compose.yml
 
 Paste the following:
