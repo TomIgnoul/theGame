@@ -7,7 +7,7 @@ BASE_URL = "https://opendata.brussels.be"
 DATASET = "bruxelles_lieux_culturels"
 ENDPOINT = f"/api/explore/v2.1/catalog/datasets/{DATASET}/records"  
 URLS =["/api/explore/v2.1/catalog/datasets/{DATASET}/records",  
-U
+]
 URL = BASE_URL + ENDPOINT
 DB_CONNINFO = "dbname=thegame user=admin password=W@cthw00rd host=localhost port=5432"
 
