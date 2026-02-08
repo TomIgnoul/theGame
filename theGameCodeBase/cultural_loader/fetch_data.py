@@ -5,20 +5,41 @@ from paginate import page_through
 from requests.exceptions import HTTPError, RequestException
 from transform import transform_record
 from api_list import BASE_URL, DATASETS
+from logging_config import setup_logging
+
+"""
+fetch_data.py – Load cultural datasets into PostgreSQL with progress logging.
+
+This script downloads cultural datasets from the Brussels Open Data portal and inserts
+the transformed records into a PostgreSQL database. It is designed to be used as a
+data loader, fetching all pages of each dataset, transforming each record via
+`transform_record()`, and inserting them into the `cultural_sites` table.
+
+Main steps:
+1. Define the datasets to fetch in api_list.py.
+2. Use the `page_through()` helper to paginate through each dataset.
+3. For each record, call `transform_record()` to normalize the fields.
+4. Insert cleaned records into PostgreSQL with `insert_cultural_site()`, committing
+   after each insert to provide durable checkpoints.
+5. Log progress at INFO level so that long runs show what page and dataset are being processed,
+   with detailed per-record logs available at DEBUG level.
+
+Prerequisites:
+- A running PostgreSQL instance accessible via the `DB_CONNINFO` connection string.
+- A table named `cultural_sites` with columns corresponding to the fields inserted.
+- Internet access to reach the Brussels Open Data API.
+
+Usage:
+    python fetch_data.py
+
+Adjust the `per_page` parameter in `process_dataset()` if you need smaller or larger pages.
+See the README for database setup instructions.
+"""
+
 
 DB_CONNINFO = "dbname=thegame user=admin password=W@cthw00rd host=localhost port=5432"
 
-# ---------------------------------------------------------------------------
-# Logging configuration
-#
-# This sets up a basic log format that shows the timestamp, log level, and
-# message. INFO level is a good default to start with. You can switch to
-# DEBUG for more detail or WARNING/ERROR to reduce output.
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%d-%m-%Y %H:%M:%S",
-)
+setup_logging()
 logger = logging.getLogger(__name__)
 
 def insert_cultural_site(clean: dict) -> None:
@@ -28,7 +49,7 @@ def insert_cultural_site(clean: dict) -> None:
     title = clean.get("description_nl") or clean.get("description_fr") or "(no title)"
     try:
         # Log that we’re about to connect to the database
-        logger.info("Connecting to database to insert: %s", title)
+        logger.debug("Connecting to database to insert: %s", title)
 
         # Append a connect_timeout parameter so psycopg won’t wait forever
         conninfo_with_timeout = DB_CONNINFO + " connect_timeout=10"
@@ -48,7 +69,8 @@ def insert_cultural_site(clean: dict) -> None:
                 """, clean)
                 conn.commit()
 
-        logger.info("Inserted record: %s", title)
+        #logger.info("Inserted record: %s", title)
+        logger.debug("Inserted record: %s", title)
     except Exception as e:
         # Log the error with full traceback to diagnose what went wrong
         logger.error("Insert failed for %s: %s", title, e, exc_info=True)
@@ -79,36 +101,67 @@ def fetch_page(dataset: str, limit: int, offset: int) -> list[dict]:
         return []
     return data.get("results", [])
 
+def process_dataset(name: str, dataset: str, per_page: int = 100) -> None:
+    """
+    Fetch all pages of a dataset from the Brussels Open Data API and insert the records.
+
+    This helper uses the `page_through` generator to request consecutive pages of
+    `per_page` records until no more data is available. For each page it logs the page
+    number and record count, transforms each record via `transform_record()`, and then
+    inserts it into PostgreSQL with `insert_cultural_site()`.
+
+    Args:
+        name: Friendly name of the dataset (e.g. "street_art").
+        dataset: API identifier for the dataset (e.g. "parcours_street_art").
+        per_page: Number of records to request per page. Adjust based on network speed
+                  and memory. Defaults to 100.
+
+    Logs:
+        INFO messages for page start/completion and per-record processing.
+        Errors are propagated from `insert_cultural_site()` and logged there.
+    """
+    def fetch_fn(limit: int, offset: int) -> list[dict]:
+        # Adapt fetch_page() to the signature expected by page_through().
+        return fetch_page(dataset, limit, offset)
+
+    for page_no, items in enumerate(page_through(fetch_fn, per_page=per_page), start=1):
+        if not items:
+            break
+        logger.info("Dataset %s: processing page %d with %d records", name, page_no, len(items))
+        for rec in items:
+            clean = transform_record(rec)
+            insert_cultural_site(clean)
+            rid = rec.get("id", "no-id")
+            logger.debug("Processed record id=%s", rid)
+            fields = rec.get("fields", rec)
+            title = (
+                fields.get("beschrijving")
+                or fields.get("description")
+                or fields.get("name")
+                or fields.get("nom")
+                or fields.get("title")
+                or "(no title)"
+            )
+
+            logger.debug("Processed record id=%s title=%s", rid, title)
+        logger.debug("Dataset %s: finished page %d", name, page_no)
+
 # ---------------------------------------------------------------------------
 # Main script
-#
+
 def main() -> None:
     logger.info("Starting cultural sites data load")
     try:
         for name, dataset in DATASETS.items():
-            logger.info("Fetching dataset: %s", name)
-            url = f"{BASE_URL}/api/explore/v2.1/catalog/datasets/{dataset}/records"
-            payload = fetch(url, params={"limit": 5})
-            if payload is None:
-                logger.warning("Fetch failed for dataset %s", name)
-                continue
+            logger.info("Beginning processing of dataset: %s", name)
+            process_dataset(name, dataset, per_page=100)
+            logger.info("Completed processing of dataset: %s", name)
 
-            results = payload.get("results", [])
-            logger.info("Fetched %d records for %s", len(results), name)
-
-            # Process first few results
-        for rec in results[:3]:
-            clean = transform_record(rec)
-            insert_cultural_site(clean)
-            rid = rec.get("id", "no-id")
-            fields = rec.get("fields", rec)
-            title = fields.get("beschrijving") or fields.get("description") or "(no title)"
-            logger.info("Processed record id=%s title=%s", rid, title)
         logger.info("Cultural sites data load finished successfully")
     except Exception:
-        # Catch any unanticipated exception and log with full traceback
         logger.exception("Unhandled exception during data load")
         raise
+
 
 if __name__ == "__main__":
     main()
