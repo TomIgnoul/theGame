@@ -6,7 +6,7 @@ authors = [
     {name = "Tom Ignoul",email = "tom.ignoul@student.ehb.be"}
 ]
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "certifi (==2025.10.5)",
     "charset-normalizer (==3.4.4)",
