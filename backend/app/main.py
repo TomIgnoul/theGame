@@ -1,15 +1,20 @@
 import os
 import time
-from fastapi import FastAPI, HTTPException 
-from psycopg import connect
-from uuid import uuid4
-from typing import Literal, Optional
-from pydantic import BaseModel, Field
 from collections import defaultdict, deque
+from typing import Literal, Optional
+from uuid import uuid4
+
+from fastapi import FastAPI, HTTPException
+from psycopg import connect
+from pydantic import BaseModel, Field
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 app = FastAPI(title="theGame API", version="0.1.0")
+
+# -------------------------
+# Rate limiting (in-memory)
+# -------------------------
 RATE_LIMITS = {
     "/routes/generate": (3, 60),  # 3 req per 60s per IP
     "/chat/stop": (10, 60),       # 10 req per 60s per IP
@@ -17,44 +22,42 @@ RATE_LIMITS = {
 
 _hits = defaultdict(deque)
 
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    path = request.url.path
 
-Theme = Literal["War", "Museum", "Streetart", "Food", "Culture"]
+    if request.method == "POST" and path in RATE_LIMITS:
+        limit, window = RATE_LIMITS[path]
+        ip = request.client.host if request.client else "unknown"
+        key = f"{ip}:{path}"
 
-class RouteGenerateRequest(BaseModel):
-    theme: Theme
-    distance_km: Optional[float] = Field(default=None, ge=0.1)
-    duration_min: Optional[int] = Field(default=None, ge=1)
+        now = time.time()
+        q = _hits[key]
 
-class RouteStop(BaseModel):
-    stop_number: int
-    poi_id: int
-    name: str
-    lat: float
-    lng: float
+        # drop old hits outside the window
+        while q and (now - q[0]) > window:
+            q.popleft()
 
-class RouteGenerateResponse(BaseModel):
-    route_id: str
-    theme: Theme
-    distance_km: Optional[float]
-    duration_min: Optional[int]
-    coordinates: list[dict]  # [{"lat":..,"lng":..}, ...]
-    stops: list[RouteStop]
+        if len(q) >= limit:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Even wachten en opnieuw proberen."},
+            )
 
-class ChatStopRequest(BaseModel):
-    route_id: str
-    stop_number: int = Field(ge=1)
-    poi_id: int
-    message: str
+        q.append(now)
 
-class ChatStopResponse(BaseModel):
-    header: str
-    reply: str
+    return await call_next(request)
 
+# -------------------------
+# Health
+# -------------------------
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
-
+# -------------------------
+# POIs
+# -------------------------
 @app.get("/pois")
 def list_pois():
     db_url = os.environ["DATABASE_URL"]
@@ -84,11 +87,36 @@ def list_pois():
         for r in rows
     ]
 
+# -------------------------
+# Routes (stub)
+# -------------------------
+Theme = Literal["War", "Museum", "Streetart", "Food", "Culture"]
+
+class RouteGenerateRequest(BaseModel):
+    theme: Theme
+    distance_km: Optional[float] = Field(default=None, ge=0.1)
+    duration_min: Optional[int] = Field(default=None, ge=1)
+
+class RouteStop(BaseModel):
+    stop_number: int
+    poi_id: int
+    name: str
+    lat: float
+    lng: float
+
+class RouteGenerateResponse(BaseModel):
+    route_id: str
+    theme: Theme
+    distance_km: Optional[float]
+    duration_min: Optional[int]
+    coordinates: list[dict]  # [{"lat":..,"lng":..}, ...]
+    stops: list[RouteStop]
+
 @app.post("/routes/generate", response_model=RouteGenerateResponse)
 def generate_route(req: RouteGenerateRequest):
-    # Minimal dummy route: take up to 5 POIs of the theme from DB
     db_url = os.environ["DATABASE_URL"]
 
+    # Minimal stub: pick up to 5 POIs matching the theme
     with connect(db_url) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -114,10 +142,7 @@ def generate_route(req: RouteGenerateRequest):
         for i, r in enumerate(rows)
     ]
 
-
-
-
-    # Dummy polyline = connect stops in order
+    # Dummy polyline: connect stops in order
     coordinates = [{"lat": s["lat"], "lng": s["lng"]} for s in stops]
 
     return {
@@ -127,7 +152,20 @@ def generate_route(req: RouteGenerateRequest):
         "duration_min": req.duration_min,
         "coordinates": coordinates,
         "stops": stops,
-        }
+    }
+
+# -------------------------
+# Chat per stop (stub)
+# -------------------------
+class ChatStopRequest(BaseModel):
+    route_id: str
+    stop_number: int = Field(ge=1)
+    poi_id: int
+    message: str
+
+class ChatStopResponse(BaseModel):
+    header: str
+    reply: str
 
 @app.post("/chat/stop", response_model=ChatStopResponse)
 def chat_stop(req: ChatStopRequest):
@@ -137,7 +175,7 @@ def chat_stop(req: ChatStopRequest):
 
     db_url = os.environ["DATABASE_URL"]
 
-    # fetch POI name for strict header format
+    # Fetch POI name for strict header format
     with connect(db_url) as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT name FROM app.pois WHERE id = %s", (req.poi_id,))
@@ -149,32 +187,7 @@ def chat_stop(req: ChatStopRequest):
     poi_name = row[0]
     header = f"Stop {req.stop_number} — {poi_name}"
 
-    # Placeholder reply (later: LLM call with context)
+    # Placeholder reply (later: LLM call with stop context)
     reply = f"(stub) Story for {poi_name}. You said: {req.message}"
 
     return {"header": header, "reply": reply}
-
-@app.middleware("http")
-async def rate_limit_middleware(request: Request, call_next):
-    path = request.url.path
-
-    if request.method == "POST" and path in RATE_LIMITS:
-        limit, window = RATE_LIMITS[path]
-        ip = request.client.host if request.client else "unknown"
-        key = f"{ip}:{path}"
-
-        now = time.time()
-        q = _hits[key]
-
-        while q and (now - q[0]) > window:
-            q.popleft()
-
-        if len(q) >= limit:
-            return JSONResponse(
-                status_code=429,
-                content={"detail": "Even wachten en opnieuw proberen."}
-            )
-
-        q.append(now)
-
-    return await call_next(request)
